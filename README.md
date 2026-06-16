@@ -83,9 +83,22 @@ Live order execution is **off by default** and double-gated for safety:
 2. Flip the **Autonomous trading** switch in the dashboard.
 
 Then Henry blends the strategy ensemble into a single conviction and places real
-**market orders** on `EUR/USD, GBP/USD, USD/JPY, AUD/USD, USD/CAD, XAU/USD`, with
-take-profit / stop-loss management. Position size and the max number of concurrent
-trades follow the **Guarded / Balanced / Aggressive** risk selector.
+**market orders** on `EUR/USD, GBP/USD, USD/JPY, AUD/USD, USD/CAD, XAU/USD`.
+Position size and the max number of concurrent trades follow the
+**Guarded / Balanced / Aggressive** risk selector.
+
+#### Native take-profit / stop-loss (server-side brackets)
+
+Every autonomous order is submitted with **OANDA bracket orders attached on fill**
+(`takeProfitOnFill` / `stopLossOnFill`). Because the brackets live on **OANDA's
+servers**, your positions stay protected even if the app, the proxy, or your
+machine goes offline. Defaults are `DEFAULT_TP_PCT=0.8` and `DEFAULT_SL_PCT=0.4`
+(price-distance %), tunable in `.env`. Protected trades show a 🛡 with their TP/SL
+on the card.
+
+For positions opened elsewhere, hit **Add TP/SL** on the trade card (live + trading
+armed) and the proxy attaches brackets to that existing trade via
+`PUT /api/trades/:id/brackets`.
 
 > ⚠️ `OANDA_ENVIRONMENT=live` + `ALLOW_TRADING=true` + Autonomous **trades real
 > money**. Start on `practice` and confirm behaviour before going live.

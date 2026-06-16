@@ -24,6 +24,7 @@ export default function App() {
     setOnline,
     toggleStrategy,
     closeTrade,
+    protectTrade,
   } = useTradingEngine();
 
   const up = state.dayPnl >= 0;
@@ -167,7 +168,13 @@ export default function App() {
                   </p>
                 )}
                 {state.trades.map((t) => (
-                  <TradeCard key={t.id} trade={t} onClose={closeTrade} />
+                  <TradeCard
+                    key={t.id}
+                    trade={t}
+                    onClose={closeTrade}
+                    canProtect={isLive && tradingEnabled}
+                    onProtect={protectTrade}
+                  />
                 ))}
               </div>
             </div>

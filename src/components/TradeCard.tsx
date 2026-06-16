@@ -1,15 +1,21 @@
-import { ArrowDownRight, ArrowUpRight, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Shield, ShieldPlus, X } from "lucide-react";
 import type { Trade } from "@/types";
 import { cn, fmtUsd, fmtPct, fmtNum } from "@/lib/utils";
 
 interface Props {
   trade: Trade;
   onClose: (id: string) => void;
+  canProtect?: boolean;
+  onProtect?: (id: string) => void;
 }
 
-export default function TradeCard({ trade, onClose }: Props) {
+export default function TradeCard({ trade, onClose, canProtect, onProtect }: Props) {
   const up = trade.pnl >= 0;
   const long = trade.side === "LONG";
+  const dp = trade.entry < 10 ? 4 : 2;
+  const hasTP = trade.tpPrice != null;
+  const hasSL = trade.slPrice != null;
+  const protectedTrade = hasTP || hasSL;
 
   return (
     <div className="group glass-soft relative overflow-hidden p-3.5 transition-all hover:-translate-y-0.5 hover:shadow-soft">
@@ -72,6 +78,34 @@ export default function TradeCard({ trade, onClose }: Props) {
         <span className="text-[10px] text-rift-muted">
           conv {Math.round(trade.confidence * 100)}%
         </span>
+      </div>
+
+      {/* Protection (native OANDA brackets) */}
+      <div className="mt-2 flex items-center justify-between">
+        {protectedTrade ? (
+          <div className="flex items-center gap-2 text-[10px] text-rift-muted">
+            <Shield size={12} className="text-rift-mint" />
+            {hasTP && (
+              <span>
+                TP <span className="text-rift-mint">{fmtNum(trade.tpPrice!, dp)}</span>
+              </span>
+            )}
+            {hasSL && (
+              <span>
+                SL <span className="text-rift-rose">{fmtNum(trade.slPrice!, dp)}</span>
+              </span>
+            )}
+          </div>
+        ) : canProtect ? (
+          <button
+            onClick={() => onProtect?.(trade.id)}
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium text-rift-azure transition hover:bg-rift-azure/10"
+          >
+            <ShieldPlus size={12} /> Add TP/SL
+          </button>
+        ) : (
+          <span className="text-[10px] text-rift-muted/70">No protection</span>
+        )}
       </div>
     </div>
   );

@@ -20,9 +20,11 @@ const RISK_PROFILE: Record<
 // Instruments Henry hunts when trading live on OANDA.
 const LIVE_INSTRUMENTS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "XAU/USD"];
 
-// Autonomous live risk management (leverage-scaled %).
-const TAKE_PROFIT = 8;
-const STOP_LOSS = -5;
+// Autonomous live risk management. TP/SL are PRICE-distance percentages sent
+// to OANDA as native bracket orders (take-profit / stop-loss on fill), so they
+// live on OANDA's servers and protect the position even if the app is closed.
+const TP_PCT = 0.8;
+const SL_PCT = 0.4;
 const SIGNAL_THRESHOLD = 0.35;
 
 const THOUGHTS_BUY = [
@@ -166,22 +168,9 @@ export function useTradingEngine() {
 
     busyRef.current = true;
     try {
-      // Manage exits first.
+      // Exits are handled by native OANDA brackets attached on entry, so the
+      // autonomous loop only opens new positions.
       const open = state.trades;
-      const exit = open.find((t) => t.pnlPct >= TAKE_PROFIT || t.pnlPct <= STOP_LOSS);
-      if (exit) {
-        await api.closeTrade(exit.id);
-        pushThought(
-          THOUGHTS_SELL[Math.floor(Math.random() * THOUGHTS_SELL.length)].replace(
-            "{sym}",
-            exit.symbol
-          ),
-          "sell"
-        );
-        await pollLive();
-        return;
-      }
-
       const profile = RISK_PROFILE[riskRef.current];
       if (open.length >= profile.maxTrades) return;
 
@@ -202,9 +191,19 @@ export function useTradingEngine() {
       const confidence = clamp(0.55 + Math.abs(agg) * 0.4, 0.55, 0.98);
       const strategy = [...active].sort((a, b) => b.weight - a.weight)[0].name;
 
-      await api.placeOrder({ instrument: target, units, strategy, confidence });
+      await api.placeOrder({
+        instrument: target,
+        units,
+        strategy,
+        confidence,
+        takeProfitPct: TP_PCT,
+        stopLossPct: SL_PCT,
+      });
       pushThought(
-        THOUGHTS_BUY[Math.floor(Math.random() * THOUGHTS_BUY.length)].replace("{sym}", target),
+        `${THOUGHTS_BUY[Math.floor(Math.random() * THOUGHTS_BUY.length)].replace(
+          "{sym}",
+          target
+        )} TP/SL set.`,
         "buy"
       );
       await pollLive();
@@ -286,6 +285,24 @@ export function useTradingEngine() {
           trades: s.trades.filter((x) => x.id !== id),
         };
       });
+    },
+    [state.trades, pollLive, pushThought]
+  );
+
+  const protectTrade = useCallback(
+    async (id: string) => {
+      if (modeRef.current !== "live") return;
+      try {
+        await api.setBrackets(id, { takeProfitPct: TP_PCT, stopLossPct: SL_PCT });
+        const t = state.trades.find((x) => x.id === id);
+        pushThought(`Protection set on ${t?.symbol ?? "position"} — TP/SL live on OANDA.`, "info");
+        await pollLive();
+      } catch (e) {
+        pushThought(
+          `Could not set protection: ${e instanceof Error ? e.message : "error"}`,
+          "alert"
+        );
+      }
     },
     [state.trades, pollLive, pushThought]
   );
@@ -471,6 +488,7 @@ export function useTradingEngine() {
     setOnline,
     toggleStrategy,
     closeTrade,
+    protectTrade,
     openTrade,
   };
 }

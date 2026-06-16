@@ -44,6 +44,17 @@ export const api = {
     units: number;
     strategy?: string;
     confidence?: number;
+    takeProfitPct?: number | null;
+    stopLossPct?: number | null;
   }) => req("/api/order", { method: "POST", body: JSON.stringify(body) }),
+  setBrackets: (
+    id: string,
+    body: {
+      takeProfitPct?: number;
+      stopLossPct?: number;
+      takeProfit?: number;
+      stopLoss?: number;
+    }
+  ) => req(`/api/trades/${id}/brackets`, { method: "PUT", body: JSON.stringify(body) }),
   closeTrade: (id: string) => req(`/api/trades/${id}/close`, { method: "PUT" }),
 };

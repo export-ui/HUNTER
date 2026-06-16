@@ -15,6 +15,8 @@ export interface Trade {
   confidence: number; // 0..1 AI conviction
   openedAt: number;
   status: TradeStatus;
+  tpPrice?: number | null; // OANDA take-profit (server-side bracket)
+  slPrice?: number | null; // OANDA stop-loss (server-side bracket)
 }
 
 export interface StrategySignal {

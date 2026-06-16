@@ -18,6 +18,8 @@ const {
   ALLOW_TRADING = "false",
   CORS_ORIGIN = "*",
   PORT = "8787",
+  DEFAULT_TP_PCT = "0.8", // take-profit price distance (%)
+  DEFAULT_SL_PCT = "0.4", // stop-loss price distance (%)
 } = process.env;
 
 const TRADING_ENABLED = String(ALLOW_TRADING).toLowerCase() === "true";
@@ -63,6 +65,54 @@ async function oanda(path, init = {}) {
 
 const toDisplay = (inst) => inst.replace("_", "/");
 const toOanda = (sym) => sym.replace("/", "_").toUpperCase();
+
+// ── Bracket helpers ──────────────────────────────────────────────────────────
+const precisionCache = new Map();
+
+async function getPrecision(instrument) {
+  if (precisionCache.has(instrument)) return precisionCache.get(instrument);
+  let precision = 5; // sane FX default
+  try {
+    const { instruments = [] } = await oanda(
+      `/instruments?instruments=${encodeURIComponent(instrument)}`
+    );
+    if (instruments[0]?.displayPrecision != null)
+      precision = instruments[0].displayPrecision;
+  } catch {
+    /* fall back to default */
+  }
+  precisionCache.set(instrument, precision);
+  return precision;
+}
+
+async function getMid(instrument) {
+  const { prices = [] } = await oanda(
+    `/pricing?instruments=${encodeURIComponent(instrument)}`
+  );
+  const p = prices[0];
+  if (!p) return null;
+  const bid = Number(p.bids?.[0]?.price ?? p.closeoutBid);
+  const ask = Number(p.asks?.[0]?.price ?? p.closeoutAsk);
+  return (bid + ask) / 2;
+}
+
+const round = (v, dp) => Number(v.toFixed(dp));
+
+/** Compute TP/SL prices from a reference price + percentage distances.
+ *  `long` true → TP above / SL below; false → mirrored. Returns {} when both
+ *  percentages are falsy (protection disabled). */
+function bracketPrices(ref, long, tpPct, slPct, dp) {
+  const out = {};
+  if (tpPct && tpPct > 0) {
+    const tp = long ? ref * (1 + tpPct / 100) : ref * (1 - tpPct / 100);
+    out.takeProfit = round(tp, dp);
+  }
+  if (slPct && slPct > 0) {
+    const sl = long ? ref * (1 - slPct / 100) : ref * (1 + slPct / 100);
+    out.stopLoss = round(sl, dp);
+  }
+  return out;
+}
 
 function requireConfig(_req, res, next) {
   if (!configured) {
@@ -176,6 +226,8 @@ app.get(
         confidence,
         openedAt: new Date(t.openTime).getTime(),
         status: "OPEN",
+        tpPrice: t.takeProfitOrder ? Number(t.takeProfitOrder.price) : null,
+        slPrice: t.stopLossOrder ? Number(t.stopLossOrder.price) : null,
       };
     });
 
@@ -207,24 +259,101 @@ app.post(
         .status(403)
         .json({ error: "Trading disabled. Set ALLOW_TRADING=true on the server to arm." });
     }
-    const { instrument, units, strategy = "Rift Hunter", confidence = 0.7 } = req.body || {};
+    const {
+      instrument,
+      units,
+      strategy = "Rift Hunter",
+      confidence = 0.7,
+      takeProfitPct,
+      stopLossPct,
+    } = req.body || {};
     if (!instrument || !units || Number.isNaN(Number(units))) {
       return res.status(400).json({ error: "instrument and numeric units are required." });
     }
+
+    const oandaInstrument = toOanda(instrument);
+    const long = Number(units) > 0;
+
+    // Native OANDA brackets — attached on fill so they live on OANDA's servers
+    // and survive the app/proxy being closed. Pass null/0 to disable.
+    const tpPct = takeProfitPct === undefined ? Number(DEFAULT_TP_PCT) : Number(takeProfitPct);
+    const slPct = stopLossPct === undefined ? Number(DEFAULT_SL_PCT) : Number(stopLossPct);
+
     const order = {
-      order: {
-        type: "MARKET",
-        instrument: toOanda(instrument),
-        units: String(Math.trunc(Number(units))),
-        timeInForce: "FOK",
-        positionFill: "DEFAULT",
-        tradeClientExtensions: {
-          tag: "rift-hunter",
-          comment: JSON.stringify({ strategy, confidence }),
-        },
+      type: "MARKET",
+      instrument: oandaInstrument,
+      units: String(Math.trunc(Number(units))),
+      timeInForce: "FOK",
+      positionFill: "DEFAULT",
+      tradeClientExtensions: {
+        tag: "rift-hunter",
+        comment: JSON.stringify({ strategy, confidence }),
       },
     };
-    const result = await oanda("/orders", { method: "POST", body: JSON.stringify(order) });
+
+    if ((tpPct && tpPct > 0) || (slPct && slPct > 0)) {
+      const [ref, dp] = await Promise.all([
+        getMid(oandaInstrument),
+        getPrecision(oandaInstrument),
+      ]);
+      if (ref) {
+        const { takeProfit, stopLoss } = bracketPrices(ref, long, tpPct, slPct, dp);
+        if (takeProfit)
+          order.takeProfitOnFill = { price: String(takeProfit), timeInForce: "GTC" };
+        if (stopLoss)
+          order.stopLossOnFill = { price: String(stopLoss), timeInForce: "GTC" };
+      }
+    }
+
+    const result = await oanda("/orders", {
+      method: "POST",
+      body: JSON.stringify({ order }),
+    });
+    res.json(result);
+  })
+);
+
+app.put(
+  "/api/trades/:id/brackets",
+  requireConfig,
+  handle(async (req, res) => {
+    if (!TRADING_ENABLED) {
+      return res
+        .status(403)
+        .json({ error: "Trading disabled. Set ALLOW_TRADING=true on the server to arm." });
+    }
+    const { takeProfitPct, stopLossPct, takeProfit, stopLoss } = req.body || {};
+
+    // Resolve the trade so we can price brackets off its entry.
+    const { trade } = await oanda(`/trades/${req.params.id}`);
+    if (!trade) return res.status(404).json({ error: "Trade not found." });
+    const long = Number(trade.currentUnits) >= 0;
+    const entry = Number(trade.price);
+    const dp = await getPrecision(trade.instrument);
+
+    let tp = takeProfit;
+    let sl = stopLoss;
+    if (tp == null && takeProfitPct != null) {
+      tp = bracketPrices(entry, long, Number(takeProfitPct), 0, dp).takeProfit;
+    }
+    if (sl == null && stopLossPct != null) {
+      sl = bracketPrices(entry, long, 0, Number(stopLossPct), dp).stopLoss;
+    }
+    // Defaults when the caller asked for protection without specifics.
+    if (tp == null && sl == null) {
+      const def = bracketPrices(entry, long, Number(DEFAULT_TP_PCT), Number(DEFAULT_SL_PCT), dp);
+      tp = def.takeProfit;
+      sl = def.stopLoss;
+    }
+
+    const body = {};
+    if (tp != null) body.takeProfit = { price: String(round(Number(tp), dp)), timeInForce: "GTC" };
+    if (sl != null) body.stopLoss = { price: String(round(Number(sl), dp)), timeInForce: "GTC" };
+
+    const result = await oanda(`/trades/${req.params.id}/orders`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
     res.json(result);
   })
 );

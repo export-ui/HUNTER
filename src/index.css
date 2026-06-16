@@ -1,0 +1,61 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-rift-bg text-rift-ink font-sans antialiased;
+  background-image: theme("backgroundImage.rift-radial");
+  background-attachment: fixed;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer components {
+  .glass {
+    @apply rounded-3xl border border-white/70 bg-white/70 backdrop-blur-xl shadow-panel;
+  }
+
+  .glass-soft {
+    @apply rounded-2xl border border-rift-line/80 bg-white/60 backdrop-blur-md;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+
+  .stat-value {
+    @apply font-display text-2xl font-semibold tracking-tight;
+  }
+
+  .grid-glow {
+    background-image: linear-gradient(rgba(46, 123, 246, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(46, 123, 246, 0.05) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+}
+
+/* Thin, light scrollbars to keep the futuristic feel */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(138, 123, 255, 0.4) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(138, 123, 255, 0.35);
+  border-radius: 999px;
+}

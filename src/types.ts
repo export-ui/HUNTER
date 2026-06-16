@@ -43,6 +43,7 @@ export interface EngineState {
   strategies: StrategySignal[];
   log: HenryThought[];
   marketRegime: "RISK-ON" | "RISK-OFF" | "CHOPPY" | "TRENDING";
+  equityHistory: number[]; // rolling samples of account equity
 }
 
 export interface HenryThought {

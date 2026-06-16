@@ -103,6 +103,30 @@ armed) and the proxy attaches brackets to that existing trade via
 > ⚠️ `OANDA_ENVIRONMENT=live` + `ALLOW_TRADING=true` + Autonomous **trades real
 > money**. Start on `practice` and confirm behaviour before going live.
 
+### Risk-based position sizing
+
+Henry no longer trades fixed lots. Each autonomous entry sends `riskPct` + `side`
+and the **proxy sizes the position off your real account equity and the stop**:
+
+```
+units ≈ (equity × riskPct%) / (price × stopLoss%)
+```
+
+So hitting the stop loses roughly `riskPct` of the account, per instrument,
+regardless of price. The risk selector maps to **Guarded 0.5% · Balanced 1% ·
+Aggressive 2%** risk per trade. (You can still pass explicit `units` to override.)
+
+### Kill-switch — flatten everything
+
+A red **Flatten all · Kill-switch** button (with confirmation) closes **every open
+position at once** via `POST /api/flatten`. It reports how many closed/failed and
+Henry narrates the action. Gated by `ALLOW_TRADING`; disabled when nothing is open.
+
+### Live equity curve
+
+The **Portfolio Equity** panel charts equity over time (real NAV when live, simulated
+otherwise) with the live P&L and % change — a pure-SVG sparkline, no chart deps.
+
 ### Safety model
 
 - Token never reaches the browser (server-side bearer injection only).

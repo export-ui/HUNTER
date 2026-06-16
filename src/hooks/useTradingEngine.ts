@@ -10,12 +10,17 @@ type Connection = "connecting" | "ok" | "error";
 
 const RISK_PROFILE: Record<
   RiskLevel,
-  { maxTrades: number; size: number; lev: number; units: number }
+  { maxTrades: number; size: number; lev: number; riskPct: number }
 > = {
-  Guarded: { maxTrades: 4, size: 4000, lev: 2, units: 1000 },
-  Balanced: { maxTrades: 6, size: 8000, lev: 5, units: 3000 },
-  Aggressive: { maxTrades: 8, size: 16000, lev: 10, units: 8000 },
+  // riskPct = % of account equity risked per trade (sized off the stop).
+  Guarded: { maxTrades: 4, size: 4000, lev: 2, riskPct: 0.5 },
+  Balanced: { maxTrades: 6, size: 8000, lev: 5, riskPct: 1 },
+  Aggressive: { maxTrades: 8, size: 16000, lev: 10, riskPct: 2 },
 };
+
+const EQUITY_HISTORY_CAP = 160;
+const pushHistory = (hist: number[], v: number) =>
+  [...hist, v].slice(-EQUITY_HISTORY_CAP);
 
 // Instruments Henry hunts when trading live on OANDA.
 const LIVE_INSTRUMENTS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "XAU/USD"];
@@ -102,6 +107,7 @@ export function useTradingEngine() {
       },
     ],
     marketRegime: "TRENDING",
+    equityHistory: [1_240_000, 1_284_500],
   }));
 
   const onlineRef = useRef(state.online);
@@ -151,6 +157,7 @@ export function useTradingEngine() {
         dayPnlPct: startEquity ? (dayPnl / startEquity) * 100 : 0,
         trades,
         marketRegime: dayPnl >= 0 ? "RISK-ON" : "RISK-OFF",
+        equityHistory: pushHistory(s.equityHistory, acct.equity),
       }));
       setConnection("ok");
       setError(null);
@@ -187,13 +194,15 @@ export function useTradingEngine() {
       if (!target) return;
 
       const side: Side = agg > 0 ? "LONG" : "SHORT";
-      const units = (side === "LONG" ? 1 : -1) * profile.units;
       const confidence = clamp(0.55 + Math.abs(agg) * 0.4, 0.55, 0.98);
       const strategy = [...active].sort((a, b) => b.weight - a.weight)[0].name;
 
+      // Risk-based sizing: the server sizes units off real equity + the stop,
+      // per instrument, so each trade risks ~riskPct of the account.
       await api.placeOrder({
         instrument: target,
-        units,
+        side,
+        riskPct: profile.riskPct,
         strategy,
         confidence,
         takeProfitPct: TP_PCT,
@@ -288,6 +297,37 @@ export function useTradingEngine() {
     },
     [state.trades, pollLive, pushThought]
   );
+
+  const flattenAll = useCallback(async () => {
+    if (modeRef.current === "live") {
+      try {
+        const r = await api.flatten();
+        pushThought(
+          `Kill-switch: flattened ${r.closed}/${r.requested} positions.`,
+          "alert"
+        );
+        await pollLive();
+      } catch (e) {
+        pushThought(
+          `Flatten failed: ${e instanceof Error ? e.message : "error"}`,
+          "alert"
+        );
+      }
+      return;
+    }
+    setState((s) => {
+      const realized = s.trades.reduce((a, t) => a + t.pnl, 0);
+      const equity = s.equity + realized;
+      return {
+        ...s,
+        equity,
+        dayPnl: s.dayPnl + realized,
+        trades: [],
+        equityHistory: pushHistory(s.equityHistory, equity),
+      };
+    });
+    pushThought("Kill-switch: all positions flattened.", "alert");
+  }, [pollLive, pushThought]);
 
   const protectTrade = useCallback(
     async (id: string) => {
@@ -407,6 +447,7 @@ export function useTradingEngine() {
           equity: liveEquity,
           dayPnl,
           dayPnlPct: (dayPnl / s.startEquity) * 100,
+          equityHistory: pushHistory(s.equityHistory, liveEquity),
         };
       });
     }, modeRef.current === "live" ? 2500 : 900);
@@ -489,6 +530,7 @@ export function useTradingEngine() {
     toggleStrategy,
     closeTrade,
     protectTrade,
+    flattenAll,
     openTrade,
   };
 }

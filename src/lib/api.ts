@@ -41,12 +41,17 @@ export const api = {
   trades: (signal?: AbortSignal) => req<Trade[]>("/api/trades", { signal }),
   placeOrder: (body: {
     instrument: string;
-    units: number;
+    units?: number;
+    side?: "LONG" | "SHORT";
+    riskPct?: number;
     strategy?: string;
     confidence?: number;
     takeProfitPct?: number | null;
     stopLossPct?: number | null;
   }) => req("/api/order", { method: "POST", body: JSON.stringify(body) }),
+  flatten: () => req<{ requested: number; closed: number; failed: number }>("/api/flatten", {
+    method: "POST",
+  }),
   setBrackets: (
     id: string,
     body: {

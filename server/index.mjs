@@ -262,17 +262,48 @@ app.post(
     const {
       instrument,
       units,
+      side, // "LONG" | "SHORT" (used with riskPct sizing)
+      riskPct, // % of account equity to risk on this trade (sized off the stop)
       strategy = "Rift Hunter",
       confidence = 0.7,
       takeProfitPct,
       stopLossPct,
     } = req.body || {};
-    if (!instrument || !units || Number.isNaN(Number(units))) {
-      return res.status(400).json({ error: "instrument and numeric units are required." });
+    if (!instrument) {
+      return res.status(400).json({ error: "instrument is required." });
     }
 
     const oandaInstrument = toOanda(instrument);
-    const long = Number(units) > 0;
+    const slPctEarly = stopLossPct === undefined ? Number(DEFAULT_SL_PCT) : Number(stopLossPct);
+
+    // ── Position sizing ──
+    // If explicit units are given, use them. Otherwise size from risk %:
+    // risk a fixed fraction of equity, so that hitting the stop loses ~riskPct.
+    let resolvedUnits = Number(units);
+    if (!units || Number.isNaN(resolvedUnits)) {
+      if (!riskPct || !side) {
+        return res
+          .status(400)
+          .json({ error: "Provide numeric units, or riskPct + side for risk-based sizing." });
+      }
+      if (!slPctEarly || slPctEarly <= 0) {
+        return res
+          .status(400)
+          .json({ error: "Risk-based sizing needs a stop-loss (stopLossPct > 0)." });
+      }
+      const [{ account }, ref] = await Promise.all([
+        oanda("/summary"),
+        getMid(oandaInstrument),
+      ]);
+      const equity = Number(account.NAV);
+      if (!ref) return res.status(502).json({ error: "No price for instrument." });
+      const riskAmount = equity * (Number(riskPct) / 100);
+      const perUnitRisk = ref * (slPctEarly / 100); // quote-ccy loss per unit at stop
+      const magnitude = Math.max(1, Math.floor(riskAmount / perUnitRisk));
+      resolvedUnits = side === "SHORT" ? -magnitude : magnitude;
+    }
+
+    const long = resolvedUnits > 0;
 
     // Native OANDA brackets — attached on fill so they live on OANDA's servers
     // and survive the app/proxy being closed. Pass null/0 to disable.
@@ -282,7 +313,7 @@ app.post(
     const order = {
       type: "MARKET",
       instrument: oandaInstrument,
-      units: String(Math.trunc(Number(units))),
+      units: String(Math.trunc(resolvedUnits)),
       timeInForce: "FOK",
       positionFill: "DEFAULT",
       tradeClientExtensions: {
@@ -310,6 +341,30 @@ app.post(
       body: JSON.stringify({ order }),
     });
     res.json(result);
+  })
+);
+
+app.post(
+  "/api/flatten",
+  requireConfig,
+  handle(async (_req, res) => {
+    if (!TRADING_ENABLED) {
+      return res
+        .status(403)
+        .json({ error: "Trading disabled. Set ALLOW_TRADING=true on the server to arm." });
+    }
+    const { trades = [] } = await oanda("/openTrades");
+    const results = await Promise.allSettled(
+      trades.map((t) =>
+        oanda(`/trades/${t.id}/close`, {
+          method: "PUT",
+          body: JSON.stringify({ units: "ALL" }),
+        })
+      )
+    );
+    const closed = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.length - closed;
+    res.json({ requested: trades.length, closed, failed });
   })
 );
 

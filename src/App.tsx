@@ -6,6 +6,7 @@ import TradeCard from "@/components/TradeCard";
 import StrategyPanel from "@/components/StrategyPanel";
 import ThoughtStream from "@/components/ThoughtStream";
 import ControlDock from "@/components/ControlDock";
+import EquityChart from "@/components/EquityChart";
 import { fmtUsd, fmtPct, cn } from "@/lib/utils";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
     toggleStrategy,
     closeTrade,
     protectTrade,
+    flattenAll,
   } = useTradingEngine();
 
   const up = state.dayPnl >= 0;
@@ -128,7 +130,7 @@ export default function App() {
 
         {/* ── Core grid ────────────────────────────────────────── */}
         <section className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* Left — strategies + controls */}
+          {/* Left — controls + equity + strategies */}
           <div className="flex flex-col gap-4 lg:col-span-3">
             <ControlDock
               online={state.online}
@@ -139,6 +141,13 @@ export default function App() {
               autonomous={autonomous}
               tradingEnabled={tradingEnabled}
               onAutonomous={setAutonomous}
+              hasOpenTrades={state.trades.length > 0}
+              onFlatten={flattenAll}
+            />
+            <EquityChart
+              data={state.equityHistory}
+              dayPnl={state.dayPnl}
+              dayPnlPct={state.dayPnlPct}
             />
             <StrategyPanel strategies={state.strategies} onToggle={toggleStrategy} />
           </div>

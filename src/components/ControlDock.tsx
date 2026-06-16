@@ -1,4 +1,4 @@
-import { Pause, Play, Shield, Zap, Gauge, Bot } from "lucide-react";
+import { Pause, Play, Shield, Zap, Gauge, Bot, OctagonX } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type RiskLevel = "Guarded" | "Balanced" | "Aggressive";
@@ -12,6 +12,8 @@ interface Props {
   autonomous?: boolean;
   tradingEnabled?: boolean;
   onAutonomous?: (v: boolean) => void;
+  hasOpenTrades?: boolean;
+  onFlatten?: () => void;
 }
 
 const RISKS: { key: RiskLevel; icon: typeof Shield }[] = [
@@ -29,7 +31,15 @@ export default function ControlDock({
   autonomous,
   tradingEnabled,
   onAutonomous,
+  hasOpenTrades,
+  onFlatten,
 }: Props) {
+  const flatten = () => {
+    if (!onFlatten) return;
+    if (window.confirm("Flatten ALL open positions now? This closes every trade.")) {
+      onFlatten();
+    }
+  };
   return (
     <div className="glass flex flex-col gap-3 p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -106,6 +116,20 @@ export default function ControlDock({
           </span>
         </button>
       )}
+
+      <button
+        onClick={flatten}
+        disabled={!hasOpenTrades}
+        className={cn(
+          "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition active:scale-95",
+          hasOpenTrades
+            ? "border-rift-rose/30 bg-rift-rose/10 text-rift-rose hover:bg-rift-rose/20"
+            : "cursor-not-allowed border-rift-line bg-rift-bg/60 text-rift-muted opacity-60"
+        )}
+      >
+        <OctagonX size={16} />
+        Flatten all · Kill-switch
+      </button>
     </div>
   );
 }

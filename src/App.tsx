@@ -1,4 +1,4 @@
-import { Activity, Wallet, Target, TrendingUp, Layers } from "lucide-react";
+import { Activity, Wallet, Target, TrendingUp, Layers, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 import { useTradingEngine } from "@/hooks/useTradingEngine";
 import Henry from "@/components/Henry";
 import StatTile from "@/components/StatTile";
@@ -6,13 +6,28 @@ import TradeCard from "@/components/TradeCard";
 import StrategyPanel from "@/components/StrategyPanel";
 import ThoughtStream from "@/components/ThoughtStream";
 import ControlDock from "@/components/ControlDock";
-import { fmtUsd, fmtPct } from "@/lib/utils";
+import { fmtUsd, fmtPct, cn } from "@/lib/utils";
 
 export default function App() {
-  const { state, riskLevel, setRiskLevel, setOnline, toggleStrategy, closeTrade } =
-    useTradingEngine();
+  const {
+    state,
+    mode,
+    connection,
+    environment,
+    tradingEnabled,
+    live,
+    error,
+    autonomous,
+    setAutonomous,
+    riskLevel,
+    setRiskLevel,
+    setOnline,
+    toggleStrategy,
+    closeTrade,
+  } = useTradingEngine();
 
   const up = state.dayPnl >= 0;
+  const isLive = mode === "live";
 
   return (
     <div className="grid-glow min-h-screen w-full">
@@ -33,7 +48,24 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Live / demo + connection */}
+            {isLive ? (
+              <span
+                className={cn(
+                  "chip",
+                  live ? "bg-rift-rose/12 text-rift-rose" : "bg-rift-azure/12 text-rift-azure"
+                )}
+              >
+                {connection === "error" ? <WifiOff size={12} /> : <Wifi size={12} />}
+                OANDA · {environment.toUpperCase()}
+                {live ? " · REAL$" : ""}
+              </span>
+            ) : (
+              <span className="chip bg-rift-amber/12 text-rift-amber">
+                <Activity size={12} /> DEMO · simulated
+              </span>
+            )}
             <span className="chip bg-rift-mint/12 text-rift-mint">
               <span className="h-1.5 w-1.5 rounded-full bg-rift-mint" />
               {state.marketRegime}
@@ -47,6 +79,15 @@ export default function App() {
             </span>
           </div>
         </header>
+
+        {/* Connection error banner */}
+        {isLive && connection === "error" && (
+          <div className="flex items-center gap-2 rounded-2xl border border-rift-rose/30 bg-rift-rose/10 px-4 py-2.5 text-sm text-rift-rose">
+            <AlertTriangle size={16} />
+            <span className="font-medium">OANDA connection problem:</span>
+            <span className="text-rift-rose/90">{error}</span>
+          </div>
+        )}
 
         {/* ── Stat strip ───────────────────────────────────────── */}
         <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
@@ -67,13 +108,13 @@ export default function App() {
           <StatTile
             icon={Target}
             label="Win Rate"
-            value={`${Math.round(state.winRate * 100)}%`}
-            sub="Trailing 30 days"
+            value={isLive ? "—" : `${Math.round(state.winRate * 100)}%`}
+            sub={isLive ? "Live account" : "Trailing 30 days"}
           />
           <StatTile
             icon={Activity}
             label="Sharpe"
-            value={state.sharpe.toFixed(2)}
+            value={isLive ? "—" : state.sharpe.toFixed(2)}
             sub="Risk-adjusted return"
           />
           <StatTile
@@ -93,6 +134,10 @@ export default function App() {
               riskLevel={riskLevel}
               onToggleOnline={setOnline}
               onRisk={setRiskLevel}
+              showAutonomous={isLive}
+              autonomous={autonomous}
+              tradingEnabled={tradingEnabled}
+              onAutonomous={setAutonomous}
             />
             <StrategyPanel strategies={state.strategies} onToggle={toggleStrategy} />
           </div>

@@ -36,15 +36,66 @@ npm run dev      # http://localhost:8080
 npm run build    # production build
 ```
 
-## 🔌 Going live (next steps)
+## 🔌 Going live with OANDA
 
-The engine is currently a **realistic simulation** so the UI is fully alive with no
-keys required. To trade real markets, replace the bodies in
-`src/hooks/useTradingEngine.ts` with calls to your exchange/broker API (e.g. a
-secured backend or Lovable's Supabase edge functions — never put API secrets in the
-browser) and pipe real fills + marks into the same `EngineState` shape in
-`src/types.ts`. Every component already renders from that state, so the visuals work
-unchanged.
+Rift Hunter ships with a **secure OANDA v20 proxy** (`server/index.mjs`). Your API
+token lives **only on the server** — never in the browser — and the frontend talks
+to the proxy. With no credentials set, the dashboard automatically runs the
+realistic **demo simulation**; the moment the proxy is configured it flips to your
+**real OANDA account**.
+
+### 1. Add your credentials
+
+```bash
+cp .env.example .env
+```
+
+Fill in `.env`:
+
+| Variable             | What it is                                                        |
+| -------------------- | ----------------------------------------------------------------- |
+| `OANDA_API_TOKEN`    | OANDA v20 token (Account → *Manage API Access* → Generate)        |
+| `OANDA_ACCOUNT_ID`   | e.g. `001-001-1234567-001`                                         |
+| `OANDA_ENVIRONMENT`  | `practice` (demo) or `live` (real money). Defaults to `practice`. |
+| `ALLOW_TRADING`      | `false` = monitor only. `true` = allow placing/closing orders.    |
+| `VITE_API_BASE`      | URL the browser uses to reach the proxy (default `:8787`).         |
+
+> These are the **same credentials your account already uses** — paste the existing
+> OANDA token + account id. Nothing about your OANDA account changes; the proxy just
+> reads/acts on it on your behalf.
+
+### 2. Run it
+
+```bash
+npm install
+npm run dev:all      # web (:8080) + OANDA proxy (:8787) together
+```
+
+Open the app. The header badge shows **OANDA · PRACTICE** (or **LIVE · REAL$**) once
+connected. Stat tiles, open trades and marks now come straight from OANDA. The **X**
+on any trade card closes the real position.
+
+### 3. Let Henry trade autonomously
+
+Live order execution is **off by default** and double-gated for safety:
+
+1. Set `ALLOW_TRADING=true` on the server, **and**
+2. Flip the **Autonomous trading** switch in the dashboard.
+
+Then Henry blends the strategy ensemble into a single conviction and places real
+**market orders** on `EUR/USD, GBP/USD, USD/JPY, AUD/USD, USD/CAD, XAU/USD`, with
+take-profit / stop-loss management. Position size and the max number of concurrent
+trades follow the **Guarded / Balanced / Aggressive** risk selector.
+
+> ⚠️ `OANDA_ENVIRONMENT=live` + `ALLOW_TRADING=true` + Autonomous **trades real
+> money**. Start on `practice` and confirm behaviour before going live.
+
+### Safety model
+
+- Token never reaches the browser (server-side bearer injection only).
+- `.env` is gitignored — secrets are never committed.
+- Monitoring is always read-only; trading requires the explicit server flag.
+- Orders Henry places are tagged `rift-hunter` in OANDA for easy auditing.
 
 ---
 

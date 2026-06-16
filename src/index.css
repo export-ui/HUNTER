@@ -22,13 +22,37 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Animated aurora mesh — subtle, light, futuristic */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  background:
+    radial-gradient(40% 40% at 20% 20%, rgba(138, 123, 255, 0.18), transparent 70%),
+    radial-gradient(35% 35% at 80% 15%, rgba(90, 169, 255, 0.16), transparent 70%),
+    radial-gradient(45% 45% at 70% 85%, rgba(47, 208, 166, 0.12), transparent 70%);
+  filter: blur(20px);
+  animation: aurora 22s ease-in-out infinite alternate;
+}
+@keyframes aurora {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(2%, -2%, 0) scale(1.08); }
+  100% { transform: translate3d(-2%, 1%, 0) scale(1.04); }
+}
+
 @layer components {
   .glass {
-    @apply rounded-3xl border border-white/70 bg-white/70 backdrop-blur-xl shadow-panel;
+    @apply rounded-3xl border border-white/80 bg-white/65 backdrop-blur-2xl;
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.9) inset,
+      0 18px 50px -28px rgba(36, 47, 92, 0.35),
+      0 2px 8px -4px rgba(36, 47, 92, 0.08);
   }
 
   .glass-soft {
-    @apply rounded-2xl border border-rift-line/80 bg-white/60 backdrop-blur-md;
+    @apply rounded-2xl border border-white/70 bg-white/55 backdrop-blur-xl;
+    box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.7) inset;
   }
 
   .chip {

@@ -1,5 +1,7 @@
+import { useEffect, useRef, useState } from "react";
 import { Activity, Wallet, Target, TrendingUp, Layers, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 import { useTradingEngine } from "@/hooks/useTradingEngine";
+import { speak, stopSpeaking, voiceSupported } from "@/lib/voice";
 import Henry from "@/components/Henry";
 import StatTile from "@/components/StatTile";
 import TradeCard from "@/components/TradeCard";
@@ -31,6 +33,19 @@ export default function App() {
 
   const up = state.dayPnl >= 0;
   const isLive = mode === "live";
+
+  // Henry's voice — narrate each new thought aloud.
+  const [voiceOn, setVoiceOn] = useState(true);
+  const lastSpoke = useRef<string | null>(null);
+  useEffect(() => {
+    const latest = state.log[0];
+    if (!voiceOn || !latest || lastSpoke.current === latest.id) return;
+    lastSpoke.current = latest.id;
+    speak(latest.text);
+  }, [state.log, voiceOn]);
+  useEffect(() => {
+    if (!voiceOn) stopSpeaking();
+  }, [voiceOn]);
 
   return (
     <div className="grid-glow min-h-screen w-full">
@@ -131,7 +146,7 @@ export default function App() {
         {/* ── Core grid ────────────────────────────────────────── */}
         <section className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-12">
           {/* Left — controls + equity + strategies */}
-          <div className="flex flex-col gap-4 lg:col-span-3">
+          <div className="order-2 flex flex-col gap-4 lg:order-1 lg:col-span-3">
             <ControlDock
               online={state.online}
               riskLevel={riskLevel}
@@ -153,14 +168,19 @@ export default function App() {
           </div>
 
           {/* Center — Henry */}
-          <div className="lg:col-span-5">
-            <div className="glass relative h-[420px] overflow-hidden lg:h-full lg:min-h-[520px]">
-              <Henry state={state} />
+          <div className="order-1 lg:order-2 lg:col-span-5">
+            <div className="glass relative h-[440px] overflow-hidden sm:h-[520px] lg:h-full lg:min-h-[520px]">
+              <Henry
+                state={state}
+                voiceOn={voiceOn}
+                onToggleVoice={() => setVoiceOn((v) => !v)}
+                voiceSupported={voiceSupported}
+              />
             </div>
           </div>
 
           {/* Right — open trades + mind */}
-          <div className="flex flex-col gap-4 lg:col-span-4">
+          <div className="order-3 flex flex-col gap-4 lg:col-span-4">
             <div className="glass flex min-h-0 flex-col p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="font-display text-sm font-semibold tracking-wide">

@@ -94,6 +94,15 @@ export default function App() {
               <span className="h-1.5 w-1.5 rounded-full bg-rift-mint" />
               {state.marketRegime}
             </span>
+            {isLive && (
+              <span className={cn("chip text-[10px]",
+                state.h4Trend === "BULL" ? "bg-rift-mint/12 text-rift-mint"
+                : state.h4Trend === "BEAR" ? "bg-rift-rose/12 text-rift-rose"
+                : "bg-white/70 text-rift-muted"
+              )}>
+                H4: {state.h4Trend}
+              </span>
+            )}
             {signalAge && (
               <span className="chip bg-rift-violet/10 text-rift-violet text-[10px]">
                 <ShieldCheck size={11} /> {signalAge}

@@ -46,6 +46,7 @@ export interface EngineState {
   strategies: StrategySignal[];
   log: HenryThought[];
   marketRegime: "RISK-ON" | "RISK-OFF" | "CHOPPY" | "TRENDING";
+  h4Trend: "BULL" | "BEAR" | "NEUTRAL";
   equityHistory: number[];
   signalsUpdatedAt: number | null;
 }
@@ -75,6 +76,7 @@ export interface InstrumentSignal {
   regime:    "RISK-ON" | "RISK-OFF" | "CHOPPY" | "TRENDING";
   atr:       number | null;
   atrPct:    number | null;
+  h4Trend:   "BULL" | "BEAR" | "NEUTRAL";
 }
 
 export interface SignalsResponse {

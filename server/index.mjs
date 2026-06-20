@@ -415,9 +415,10 @@ async function fetchCandles(instrument, granularity = "M15", count = 120) {
 
 // ── Compute all strategy signals for one instrument ────────────────────────
 async function computeSignals(oandaInstrument) {
-  const [m15, h1] = await Promise.all([
+  const [m15, h1, h4] = await Promise.all([
     fetchCandles(oandaInstrument, "M15", 120),
     fetchCandles(oandaInstrument, "H1", 100),
+    fetchCandles(oandaInstrument, "H4",  80), // ~14 days of H4
   ]);
 
   if (m15.length < 40) {
@@ -432,6 +433,7 @@ async function computeSignals(oandaInstrument) {
       regime:     "TRENDING",
       atr:        null,
       atrPct:     null,
+      h4Trend:    "NEUTRAL",
     };
   }
 
@@ -439,6 +441,16 @@ async function computeSignals(oandaInstrument) {
   const atrVal = atr(m15, 14);
   const h1Closes = h1.map((c) => c.c);
   const historicalAtr = atr(h1.slice(0, 60), 14);
+
+  // H4 trend filter: use EMA50 on H4 to identify macro direction.
+  // Counter-trend entries get 40% conviction penalty; aligned entries get 10% boost.
+  const h4Closes = h4.map((c) => c.c);
+  const h4Ema50 = h4Closes.length >= 50 ? ema(h4Closes, 50) : null;
+  const h4Price = h4Closes.length > 0 ? h4Closes[h4Closes.length - 1] : null;
+  const h4TrendBias = h4Ema50 && h4Price
+    ? (h4Price > h4Ema50 ? 1 : h4Price < h4Ema50 ? -1 : 0)
+    : 0;
+  const h4Trend = h4TrendBias > 0 ? "BULL" : h4TrendBias < 0 ? "BEAR" : "NEUTRAL";
 
   const momentum  = momentumSignal(closes);
   const meanrev   = meanReversionSignal(closes);
@@ -457,11 +469,16 @@ async function computeSignals(oandaInstrument) {
     { s: volSig,    w: 0.15 },
   ];
 
-  // Weight each strategy by its confidence × base weight
   const wsum = strategies.reduce((a, { s, w }) => a + w * s.confidence, 0);
-  const aggregate = wsum > 0
+  const rawAggregate = wsum > 0
     ? strategies.reduce((a, { s, w }) => a + w * s.confidence * s.bias, 0) / wsum
     : 0;
+
+  // Apply H4 trend gate: boost aligned signals, penalise counter-trend ones.
+  const h4Gate = h4TrendBias !== 0
+    ? (Math.sign(rawAggregate) === h4TrendBias ? 1.10 : 0.60)
+    : 1.0;
+  const aggregate = Math.max(-1, Math.min(1, rawAggregate * h4Gate));
 
   const price = closes[closes.length - 1];
 
@@ -472,10 +489,11 @@ async function computeSignals(oandaInstrument) {
     arb: arbSig,
     sentiment,
     vol: volSig,
-    aggregate: Math.max(-1, Math.min(1, aggregate)),
+    aggregate,
     regime: detectRegime(h1Closes.length > 50 ? h1Closes : closes, atrVal),
     atr: atrVal,
     atrPct: atrVal && price ? (atrVal / price) * 100 : null,
+    h4Trend,
   };
 }
 

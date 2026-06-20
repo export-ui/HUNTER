@@ -127,6 +127,7 @@ export function useTradingEngine() {
       },
     ],
     marketRegime: "TRENDING",
+    h4Trend: "NEUTRAL",
     equityHistory: [1_240_000, 1_284_500],
     signalsUpdatedAt: null,
   }));
@@ -174,14 +175,18 @@ export function useTradingEngine() {
         }
       }
 
-      // Pick dominant regime across instruments
+      // Pick dominant regime and H4 trend across instruments
       const regimeCounts: Record<string, number> = {};
+      const h4TrendCounts: Record<string, number> = {};
       for (const instr of instruments) {
-        const r = resp.signals[instr].regime;
-        regimeCounts[r] = (regimeCounts[r] || 0) + 1;
+        const sig = resp.signals[instr];
+        regimeCounts[sig.regime] = (regimeCounts[sig.regime] || 0) + 1;
+        if (sig.h4Trend) h4TrendCounts[sig.h4Trend] = (h4TrendCounts[sig.h4Trend] || 0) + 1;
       }
       const dominantRegime = Object.entries(regimeCounts).sort((a, b) => b[1] - a[1])[0][0] as
         EngineState["marketRegime"];
+      const dominantH4 = Object.entries(h4TrendCounts).sort((a, b) => b[1] - a[1])[0]?.[0] as
+        EngineState["h4Trend"] ?? "NEUTRAL";
 
       setState((s) => ({
         ...s,
@@ -200,6 +205,7 @@ export function useTradingEngine() {
           };
         }),
         marketRegime: dominantRegime,
+        h4Trend: dominantH4,
         signalsUpdatedAt: resp.computedAt,
       }));
     },

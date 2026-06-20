@@ -1,12 +1,16 @@
+import { Volume2, VolumeX } from "lucide-react";
 import HenryParticles from "./HenryParticles";
 import { cn } from "@/lib/utils";
 import type { EngineState } from "@/types";
 
 interface Props {
   state: EngineState;
+  voiceOn: boolean;
+  onToggleVoice: () => void;
+  voiceSupported: boolean;
 }
 
-export default function Henry({ state }: Props) {
+export default function Henry({ state, voiceOn, onToggleVoice, voiceSupported }: Props) {
   const status = !state.online
     ? "Paused"
     : state.speaking
@@ -19,40 +23,59 @@ export default function Henry({ state }: Props) {
 
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center">
-      {/* Ambient rings */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="h-[78%] w-[78%] rounded-full border border-rift-violet/15" />
-        <div className="absolute h-[60%] w-[60%] rounded-full border border-rift-azure/15" />
-        <div
-          className={cn(
-            "absolute h-[60%] w-[60%] rounded-full border-2 border-rift-violet/30",
-            state.online && "animate-pulse-ring"
-          )}
-        />
-      </div>
-
-      {/* Particle canvas */}
+      {/* Particle orb */}
       <HenryParticles
         speaking={state.speaking}
         thinking={state.thinking}
         online={state.online}
-        className="relative z-10 h-full w-full"
+        className="absolute inset-0 z-0 h-full w-full"
       />
 
-      {/* Name + status */}
-      <div className="pointer-events-none absolute left-1/2 top-5 z-20 -translate-x-1/2 text-center">
-        <div className="font-display text-lg font-semibold tracking-[0.3em] text-rift-ink/80">
-          HENRY
-        </div>
-        <div className="mt-0.5 flex items-center justify-center gap-1.5 text-xs text-rift-muted">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              state.online ? "bg-rift-mint" : "bg-rift-muted"
+      {/* Top bar: name + voice toggle */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-5">
+        <div>
+          <div className="font-display text-lg font-semibold tracking-[0.4em] text-rift-ink/85">
+            HENRY
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-xs text-rift-muted">
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                state.online ? "bg-rift-mint shadow-[0_0_8px_2px_rgba(47,208,166,0.5)]" : "bg-rift-muted"
+              )}
+            />
+            {status}
+            {state.speaking && (
+              <span className="ml-1 flex items-end gap-0.5">
+                {[0, 1, 2, 3].map((i) => (
+                  <span
+                    key={i}
+                    className="w-0.5 rounded-full bg-rift-violet"
+                    style={{
+                      height: 6,
+                      animation: `eq 0.7s ease-in-out ${i * 0.12}s infinite alternate`,
+                    }}
+                  />
+                ))}
+              </span>
             )}
-          />
-          {status}
+          </div>
         </div>
+
+        {voiceSupported && (
+          <button
+            onClick={onToggleVoice}
+            className={cn(
+              "pointer-events-auto flex h-9 w-9 items-center justify-center rounded-xl border backdrop-blur-md transition",
+              voiceOn
+                ? "border-rift-violet/40 bg-rift-violet/15 text-rift-violet"
+                : "border-rift-line bg-white/60 text-rift-muted hover:text-rift-ink"
+            )}
+            title={voiceOn ? "Mute Henry" : "Let Henry speak"}
+          >
+            {voiceOn ? <Volume2 size={17} /> : <VolumeX size={17} />}
+          </button>
+        )}
       </div>
 
       {/* Live thought caption */}
@@ -60,7 +83,7 @@ export default function Henry({ state }: Props) {
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-20 w-[88%] -translate-x-1/2 text-center">
           <div
             key={latest.id}
-            className="animate-fade-up rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 text-sm font-medium text-rift-ink/90 shadow-soft backdrop-blur-md"
+            className="animate-fade-up rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 text-sm font-medium text-rift-ink/90 shadow-soft backdrop-blur-xl"
           >
             <span className="mr-1.5 text-rift-violet">“</span>
             {latest.text}
@@ -68,6 +91,8 @@ export default function Henry({ state }: Props) {
           </div>
         </div>
       )}
+
+      <style>{`@keyframes eq{from{height:3px}to{height:13px}}`}</style>
     </div>
   );
 }

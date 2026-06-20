@@ -7,19 +7,32 @@ interface Props {
   className?: string;
 }
 
-interface FaceParticle {
-  x: number;
-  y: number;
-  tx: number;
-  ty: number;
-  vx: number;
-  vy: number;
-  size: number;
-  sprite: number;
-  phase: number; // for breathing / shimmer
-  mouth: boolean; // belongs to the mouth band (animates while speaking)
+// Gradient palette (sky -> azure -> violet -> highlight) sampled into sprites.
+const PALETTE = ["#5aa9ff", "#3f86f7", "#5f74f6", "#8a7bff", "#a9b8ff", "#e8f0ff"];
+const DUST = ["#9db9ff", "#b9a9ff", "#c4d3ff"];
+
+function makeSprite(color: string, dim = 32): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = c.height = dim;
+  const g = c.getContext("2d")!;
+  const grd = g.createRadialGradient(dim / 2, dim / 2, 0, dim / 2, dim / 2, dim / 2);
+  grd.addColorStop(0, color);
+  grd.addColorStop(0.4, color);
+  grd.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grd;
+  g.beginPath();
+  g.arc(dim / 2, dim / 2, dim / 2, 0, Math.PI * 2);
+  g.fill();
+  return c;
 }
 
+interface P3 {
+  x: number;
+  y: number;
+  z: number;
+  lat: number; // 0..1 latitude for colouring
+  phase: number;
+}
 interface Dust {
   x: number;
   y: number;
@@ -29,239 +42,211 @@ interface Dust {
   life: number;
   maxLife: number;
   sprite: number;
-  ox: number; // origin x along the bar
-}
-
-const COLORS = ["#5aa9ff", "#2e7bf6", "#8a7bff", "#2fd0a6"];
-const DUST_COLORS = ["#9db9ff", "#b9a9ff", "#8fd9c4", "#a9c6ff"];
-
-function makeSprite(color: string, dim = 36): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = c.height = dim;
-  const g = c.getContext("2d")!;
-  const grd = g.createRadialGradient(dim / 2, dim / 2, 0, dim / 2, dim / 2, dim / 2);
-  grd.addColorStop(0, color);
-  grd.addColorStop(0.35, color);
-  grd.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = grd;
-  g.beginPath();
-  g.arc(dim / 2, dim / 2, dim / 2, 0, Math.PI * 2);
-  g.fill();
-  return c;
-}
-
-/** Draws an abstract human bust into an offscreen canvas and samples it
- *  into particle target points. The bust sits ABOVE the bar line. */
-function sampleFace(w: number, h: number, barY: number) {
-  const off = document.createElement("canvas");
-  off.width = w;
-  off.height = h;
-  const c = off.getContext("2d")!;
-  c.clearRect(0, 0, w, h);
-  c.fillStyle = "#fff";
-
-  const cx = w / 2;
-  const headR = Math.min(w, barY) * 0.27;
-  const headCy = barY - headR * 1.9;
-
-  // Shoulders / bust
-  c.beginPath();
-  c.moveTo(cx - headR * 2.4, barY);
-  c.quadraticCurveTo(cx - headR * 1.7, headCy + headR * 1.1, cx - headR * 0.7, headCy + headR * 1.0);
-  c.lineTo(cx + headR * 0.7, headCy + headR * 1.0);
-  c.quadraticCurveTo(cx + headR * 1.7, headCy + headR * 1.1, cx + headR * 2.4, barY);
-  c.closePath();
-  c.fill();
-
-  // Neck
-  c.fillRect(cx - headR * 0.42, headCy + headR * 0.4, headR * 0.84, headR * 1.0);
-
-  // Head
-  c.beginPath();
-  c.ellipse(cx, headCy, headR * 0.92, headR * 1.12, 0, 0, Math.PI * 2);
-  c.fill();
-
-  // sample
-  const img = c.getImageData(0, 0, w, h).data;
-  const pts: { x: number; y: number; mouth: boolean }[] = [];
-  const step = Math.max(3, Math.round(Math.min(w, h) / 150));
-  const mouthY = headCy + headR * 0.45;
-  for (let y = 0; y < h; y += step) {
-    for (let x = 0; x < w; x += step) {
-      const a = img[(y * w + x) * 4 + 3];
-      if (a > 120) {
-        const jx = x + (Math.random() - 0.5) * step;
-        const jy = y + (Math.random() - 0.5) * step;
-        const mouth =
-          Math.abs(y - mouthY) < headR * 0.16 && Math.abs(x - cx) < headR * 0.45;
-        pts.push({ x: jx, y: jy, mouth });
-      }
-    }
-  }
-  return { pts, headCy, headR, cx };
 }
 
 export default function HenryParticles({ speaking, thinking, online, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ speaking, thinking, online });
-  stateRef.current = { speaking, thinking, online };
+  const st = useRef({ speaking, thinking, online });
+  st.current = { speaking, thinking, online };
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-    const sprites = COLORS.map((c) => makeSprite(c));
-    const dustSprites = DUST_COLORS.map((c) => makeSprite(c, 24));
+    const sprites = PALETTE.map((c) => makeSprite(c));
+    const dustSprites = DUST.map((c) => makeSprite(c, 22));
 
-    let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    let W = 0;
-    let H = 0;
-    let barY = 0;
-    let face: FaceParticle[] = [];
+    let W = 0,
+      H = 0,
+      cx = 0,
+      cyOrb = 0,
+      barY = 0,
+      R = 0;
+    let pts: P3[] = [];
+    const rings: P3[][] = [];
     let dust: Dust[] = [];
     let raf = 0;
     let t = 0;
+    let rot = 0;
+    let energy = 0; // smoothed activity level
+
+    const fib = (n: number, jitter = 0): P3[] => {
+      const out: P3[] = [];
+      const golden = Math.PI * (3 - Math.sqrt(5));
+      for (let i = 0; i < n; i++) {
+        const y = 1 - (i / (n - 1)) * 2;
+        const r = Math.sqrt(Math.max(0, 1 - y * y));
+        const th = golden * i;
+        const j = 1 + (Math.random() - 0.5) * jitter;
+        out.push({
+          x: Math.cos(th) * r * j,
+          y: y * j,
+          z: Math.sin(th) * r * j,
+          lat: (y + 1) / 2,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
+      return out;
+    };
 
     const build = () => {
       const rect = canvas.getBoundingClientRect();
       W = Math.max(1, Math.floor(rect.width));
       H = Math.max(1, Math.floor(rect.height));
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = W * dpr;
       canvas.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       barY = H * 0.66;
-      const { pts } = sampleFace(W, H, barY);
+      R = Math.min(W, H) * 0.3;
+      cx = W / 2;
+      cyOrb = barY - R * 1.04;
 
-      // Cap particles for performance.
-      const CAP = 2600;
-      const chosen = pts.length > CAP ? pts.sort(() => Math.random() - 0.5).slice(0, CAP) : pts;
-
-      face = chosen.map((p) => ({
-        x: W / 2 + (Math.random() - 0.5) * W,
-        y: H / 2 + (Math.random() - 0.5) * H,
-        tx: p.x,
-        ty: p.y,
-        vx: 0,
-        vy: 0,
-        size: 1.4 + Math.random() * 2.2,
-        sprite: Math.random() < 0.08 ? 3 : Math.floor(Math.random() * 3),
-        phase: Math.random() * Math.PI * 2,
-        mouth: p.mouth,
-      }));
-
-      const DUST_CAP = 900;
-      dust = Array.from({ length: DUST_CAP }, () => spawnDust(true));
+      pts = fib(Math.min(1700, Math.floor((W * H) / 700)), 0.04);
+      rings.length = 0;
+      // flowing orbital streams (great-circle rings at slightly larger radius)
+      for (let k = 0; k < 3; k++) {
+        const ring: P3[] = [];
+        const count = 120;
+        const tilt = (k / 3) * Math.PI;
+        for (let i = 0; i < count; i++) {
+          const a = (i / count) * Math.PI * 2;
+          const x = Math.cos(a) * 1.16;
+          const z = Math.sin(a) * 1.16;
+          // tilt around X
+          const y = z * Math.sin(tilt);
+          const z2 = z * Math.cos(tilt);
+          ring.push({ x, y, z: z2, lat: (y + 1) / 2, phase: tilt });
+        }
+        rings.push(ring);
+      }
+      dust = Array.from({ length: 520 }, () => spawnDust(true));
     };
 
     function spawnDust(init = false): Dust {
-      // emit along the bar, weighted to the bust centre
-      const spread = W * 0.34;
-      const ox = W / 2 + (Math.random() - 0.5) * 2 * spread;
-      const maxLife = 70 + Math.random() * 120;
+      const ox = cx + (Math.random() - 0.5) * R * 1.6;
+      const maxLife = 60 + Math.random() * 110;
       return {
-        x: ox + (Math.random() - 0.5) * 8,
-        y: barY + (init ? Math.random() * (H - barY) : 0),
+        x: ox,
+        y: barY + (init ? Math.random() * (H - barY) : (Math.random() - 0.5) * 6),
         vx: (Math.random() - 0.5) * 0.5,
-        vy: 0.3 + Math.random() * 1.1,
-        size: 0.6 + Math.random() * 1.8,
+        vy: 0.25 + Math.random() * 1.0,
+        size: 0.5 + Math.random() * 1.6,
         life: init ? Math.random() * maxLife : 0,
         maxLife,
         sprite: Math.floor(Math.random() * dustSprites.length),
-        ox,
       };
     }
+
+    const project = (p: P3, rad: number) => {
+      // rotate around Y
+      const cosR = Math.cos(rot),
+        sinR = Math.sin(rot);
+      let x = p.x * cosR - p.z * sinR;
+      let z = p.x * sinR + p.z * cosR;
+      // fixed tilt around X
+      const tilt = -0.42;
+      const y = p.y * Math.cos(tilt) - z * Math.sin(tilt);
+      z = p.y * Math.sin(tilt) + z * Math.cos(tilt);
+      const persp = 1 / (1.8 - z * 0.6); // closer -> larger
+      return {
+        sx: cx + x * rad * persp,
+        sy: cyOrb + y * rad * persp,
+        depth: (z + 1) / 2, // 0 far .. 1 near
+        persp,
+      };
+    };
 
     const draw = () => {
       raf = requestAnimationFrame(draw);
       t += 1;
-      const { speaking: sp, thinking: th, online: on } = stateRef.current;
+      const { speaking: sp, thinking: th, online: on } = st.current;
+      const target = (on ? 0.3 : 0.08) + (th ? 0.45 : 0) + (sp ? 0.7 : 0);
+      energy += (target - energy) * 0.06;
+      rot += 0.0024 + energy * 0.004;
+
       ctx.clearRect(0, 0, W, H);
 
-      const energy = (sp ? 1 : 0) * 1 + (th ? 0.6 : 0) + (on ? 0.25 : 0);
-      const breathe = Math.sin(t * 0.02) * 2;
-      const sway = Math.sin(t * 0.013) * (on ? 3 : 1);
+      // soft core glow
+      const halo = ctx.createRadialGradient(cx, cyOrb, 0, cx, cyOrb, R * 1.5);
+      halo.addColorStop(0, `rgba(138,123,255,${0.10 + energy * 0.10})`);
+      halo.addColorStop(0.5, `rgba(90,169,255,${0.05 + energy * 0.05})`);
+      halo.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(cx - R * 1.5, cyOrb - R * 1.5, R * 3, R * 3);
 
-      // ---- Face ----
-      ctx.globalCompositeOperation = "source-over";
-      for (let i = 0; i < face.length; i++) {
-        const p = face[i];
-        let tx = p.tx + sway;
-        let ty = p.ty + breathe * 0.4;
+      // speaking ripple amplitude (surface waveform)
+      const speakAmp = sp ? 0.06 + Math.sin(t * 0.3) * 0.02 : 0;
 
-        // mouth band animates while speaking
-        if (p.mouth && sp) {
-          ty += Math.sin(t * 0.5 + p.x * 0.05) * 4;
-        }
-        // thinking adds a soft turbulence across the whole face
-        if (th) {
-          tx += Math.sin(t * 0.08 + p.phase) * 2.4;
-          ty += Math.cos(t * 0.07 + p.phase) * 2.4;
-        }
-        // idle shimmer
-        const jitter = on ? 0.6 : 0.2;
-        tx += Math.sin(t * 0.05 + p.phase) * jitter;
-
-        const k = 0.06 + energy * 0.02;
-        p.vx += (tx - p.x) * k;
-        p.vy += (ty - p.y) * k;
-        p.vx *= 0.78;
-        p.vy *= 0.78;
-        p.x += p.vx;
-        p.y += p.vy;
-
-        const pulse = 1 + Math.sin(t * 0.06 + p.phase) * 0.18 * (1 + energy);
-        const r = p.size * pulse * 2.4;
-        ctx.globalAlpha = on ? 0.85 : 0.45;
-        const s = sprites[p.sprite];
-        ctx.drawImage(s, p.x - r, p.y - r, r * 2, r * 2);
+      // ── orb particles ──
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        // breathing + speaking surface modulation by latitude
+        const wob =
+          1 +
+          Math.sin(t * 0.03 + p.phase) * 0.012 +
+          speakAmp * Math.sin(p.lat * 14 + t * 0.5) +
+          (th ? Math.sin(t * 0.08 + p.phase) * 0.02 : 0);
+        const pr = project(p, R * wob);
+        const ci = Math.min(
+          PALETTE.length - 1,
+          Math.floor(p.lat * 3 + pr.depth * 2.5)
+        );
+        const size = (0.7 + pr.depth * 2.2) * pr.persp;
+        ctx.globalAlpha = (on ? 0.35 + pr.depth * 0.6 : 0.2 + pr.depth * 0.3);
+        const s = sprites[ci];
+        ctx.drawImage(s, pr.sx - size, pr.sy - size, size * 2, size * 2);
       }
 
-      // ---- The bar line: where Henry is solid ----
-      const grdW = W * 0.42;
-      const lg = ctx.createLinearGradient(W / 2 - grdW, 0, W / 2 + grdW, 0);
+      // ── flowing rings ──
+      for (let k = 0; k < rings.length; k++) {
+        const ring = rings[k];
+        const rr = R * (1.14 + Math.sin(t * 0.02 + k) * 0.02);
+        for (let i = 0; i < ring.length; i++) {
+          const pr = project(ring[i], rr);
+          const size = (0.5 + pr.depth * 1.3) * pr.persp;
+          ctx.globalAlpha = (on ? 0.18 + pr.depth * 0.4 : 0.12) * (0.6 + energy);
+          ctx.drawImage(sprites[4], pr.sx - size, pr.sy - size, size * 2, size * 2);
+        }
+      }
+
+      // ── bar line ──
+      const grdW = R * 1.7;
+      const lg = ctx.createLinearGradient(cx - grdW, 0, cx + grdW, 0);
       lg.addColorStop(0, "rgba(90,169,255,0)");
-      lg.addColorStop(0.5, `rgba(46,123,246,${0.55 + energy * 0.2})`);
+      lg.addColorStop(0.5, `rgba(63,134,247,${0.6 + energy * 0.25})`);
       lg.addColorStop(1, "rgba(138,123,255,0)");
       ctx.globalAlpha = 1;
       ctx.fillStyle = lg;
-      ctx.fillRect(W / 2 - grdW, barY - 1.2, grdW * 2, 2.4);
-      // soft glow under the bar
-      ctx.globalAlpha = 0.25 + energy * 0.15;
-      ctx.fillRect(W / 2 - grdW, barY - 4, grdW * 2, 8);
+      ctx.fillRect(cx - grdW, barY - 1.3, grdW * 2, 2.6);
+      ctx.globalAlpha = 0.22 + energy * 0.15;
+      ctx.fillRect(cx - grdW, barY - 5, grdW * 2, 10);
 
-      // ---- Dust: fades down from the bar ----
-      ctx.globalCompositeOperation = "source-over";
-      const emitBoost = 1 + energy * 0.8;
+      // ── dust dissolving below the bar ──
+      const boost = 1 + energy * 0.9;
       for (let i = 0; i < dust.length; i++) {
         const d = dust[i];
-        d.life += 1 * emitBoost;
-        d.vy += 0.004; // gentle gravity
-        d.vx += Math.sin((d.y + t) * 0.02) * 0.01; // drift
-        d.x += d.vx + sway * 0.04;
+        d.life += boost;
+        d.vy += 0.004;
+        d.vx += Math.sin((d.y + t) * 0.02) * 0.01;
+        d.x += d.vx;
         d.y += d.vy;
-
-        const lifeT = d.life / d.maxLife;
-        if (lifeT >= 1 || d.y > H + 10) {
+        const lt = d.life / d.maxLife;
+        if (lt >= 1 || d.y > H + 8) {
           dust[i] = spawnDust(false);
           continue;
         }
-        // fade in quickly near the bar, then fade out as it falls
-        const alpha = (on ? 0.7 : 0.35) * Math.sin(Math.min(1, lifeT) * Math.PI);
-        const r = d.size * (1.2 - lifeT * 0.6) * 2.0;
-        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.globalAlpha = Math.max(0, (on ? 0.7 : 0.35) * Math.sin(Math.min(1, lt) * Math.PI));
+        const r = d.size * (1.2 - lt * 0.6) * 1.9;
         ctx.drawImage(dustSprites[d.sprite], d.x - r, d.y - r, r * 2, r * 2);
       }
-
       ctx.globalAlpha = 1;
     };
 
     build();
     draw();
-
     const ro = new ResizeObserver(() => build());
     ro.observe(canvas);
-
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();

@@ -100,6 +100,7 @@ export function useTradingEngine() {
   const startEquityRef  = useRef<number | null>(null);
   const prevIdsRef      = useRef<Set<string>>(new Set());
   const busyRef         = useRef(false);
+  const beAppliedRef    = useRef<Set<string>>(new Set()); // track trades with BE stop applied
   // Cache of latest real signals from the server
   const liveSignalsRef  = useRef<SignalsResponse | null>(null);
 
@@ -264,6 +265,25 @@ export function useTradingEngine() {
       }));
       setConnection("ok");
       setError(null);
+
+      // Dynamic break-even: move SL to entry when a trade reaches +1R profit.
+      // Fire-and-forget — never blocks the poll loop or UI.
+      if (healthRef.current?.tradingEnabled) {
+        for (const t of trades) {
+          if (!t.tpPrice || !t.slPrice || beAppliedRef.current.has(t.id)) continue;
+          const dir = t.side === "LONG" ? 1 : -1;
+          const stopDist = Math.abs(t.entry - t.slPrice);
+          if (stopDist <= 0) continue;
+          const profit = (t.mark - t.entry) * dir;
+          const alreadyBe = dir > 0 ? t.slPrice >= t.entry : t.slPrice <= t.entry;
+          if (profit >= stopDist && !alreadyBe) {
+            beAppliedRef.current.add(t.id);
+            api.setBrackets(t.id, { stopLoss: t.entry })
+              .then(() => pushThought(`Break-even lock on ${t.symbol}: SL moved to entry.`, "info"))
+              .catch(() => beAppliedRef.current.delete(t.id));
+          }
+        }
+      }
     } catch (e) {
       setConnection("error");
       setError(e instanceof Error ? e.message : "OANDA request failed");
@@ -275,6 +295,11 @@ export function useTradingEngine() {
     if (busyRef.current) return;
     const h = healthRef.current;
     if (!h?.tradingEnabled || !autoRef.current || !onlineRef.current) return;
+
+    // Session gate: only enter during liquid market hours (London + NY: 07:00-20:00 UTC).
+    // Avoids wide spreads and thin liquidity during Asian late-session and weekends.
+    const utcH = new Date().getUTCHours();
+    if (utcH < 7 || utcH >= 20) return;
 
     busyRef.current = true;
     try {
